@@ -55,26 +55,10 @@ class PtdrlRobEnv():
         # Navigation
         self.amcl = amcl
         self.status_move_base = 0
-
-        # Tracking
-        self.num_tracks = num_tracks # NUmber of clusters to track
-        self.n_frames = 10 # Number of costmap frames for video prediction
-        self.counter = 0 # Counter to 
-        self.costmap_bufferr = [None]*10 # Buffer to store the last 10 costmaps. 60x60
-        self.k = 1 # Minimum number of distances
-        self.min_scan_buffer = [None]*10 # Buffer to store the last 10 min scans.
-        self.min_scan_buffer_size = 0 # How many scan readings are done at each step
-        self.odom_buffer = [None]*10 # Buffer to store the last 10 velocities.
-        self.odom_buffer_size = 0 # How many scan readings are done at each step
-
+        
         # Sensors
         self.scann = LaserScan()
         self.odomm = Odometry()
-        self.vizz = MarkerArray()
-        for i in range(self.num_tracks):
-            marker = Marker()
-            marker.id = i
-            self.vizz.markers.append(marker)
         self.costmapp = OccupancyGrid()
 
         # Local planner
@@ -146,17 +130,12 @@ class PtdrlRobEnv():
         rospy.loginfo("Waiting for move base action")
         self._move_base_client.wait_for_server()
 
-        #self._tuning_client_local = dynamic_reconfigure.client.Client('move_base/DWAPlannerROS',timeout=4, config_callback=None)
-        self._tuning_client_local = dynamic_reconfigure.client.Client('move_base/TebLocalPlannerROS',timeout=4, config_callback=None)
+        self._tuning_client_local = dynamic_reconfigure.client.Client('move_base/DWAPlannerROS',timeout=4, config_callback=None)
+        #self._tuning_client_local = dynamic_reconfigure.client.Client('move_base/TebLocalPlannerROS',timeout=4, config_callback=None)
         self._tuning_client_inflation = dynamic_reconfigure.client.Client('move_base/local_costmap/inflation_layer',timeout=4, config_callback=None)
-
         
 
-                # Launch init function
-        #super(PtdrlRobEnv, self).__init__(model_name = self.model_name, amcl = self.amcl, min_dist_to_obstacle = self.min_dist_to_obstacle,
-                                       # min_dist_to_goal = self.min_dist_to_goal, num_tracks = self.num_tracks, timeout = self.timeout)
-
-        super(PtdrlRobEnv, self).__init__()
+        super(RobEnv, self).__init__()
 
         # RobotEnv methods
 
@@ -247,16 +226,6 @@ class PtdrlRobEnv():
             yhat = y
         gphat = np.column_stack((xhat, yhat))
         gphat.tolist()
-
-        # plt.scatter(-gphat[:, 1], gphat[:, 0])
-        # plt.xlabel('X Position')
-        # plt.ylabel('Y Position')
-        # plt.title('Scatter Plot of X and Y Positions')
-        # plt.grid(True)
-        # plt.show(block=False)
-        # plt.pause(1)
-        # plt.close()
-        # plt.show()
         self.gpp = gphat
     
     def _cmd_vel_callback(self, msg):
@@ -381,21 +350,6 @@ class PtdrlRobEnv():
         return gp
     
     def get_odom(self):
-        # odom = Odometry()
-        # current_time = rospy.Time.now()
-        # odom.header.stamp = current_time
-        # odom.pose.pose.position.x = self.odomm.pose.pose.position.x
-        # odom.pose.pose.position.y = self.odomm.pose.pose.position.y
-        # odom.pose.pose.orientation.x = self.odomm.pose.pose.orientation.x
-        # odom.pose.pose.orientation.y = self.odomm.pose.pose.orientation.y
-        # odom.pose.pose.orientation.z = self.odomm.pose.pose.orientation.z
-        # odom.pose.pose.orientation.w = self.odomm.pose.pose.orientation.w
-        # odom.twist.twist.linear.x = self.odomm.twist.twist.linear.x
-        # odom.twist.twist.linear.y = self.odomm.twist.twist.linear.y
-        # odom.twist.twist.linear.z = self.odomm.twist.twist.linear.z
-        # odom.twist.twist.angular.x = self.odomm.twist.twist.angular.x 
-        # odom.twist.twist.angular.y = self.odomm.twist.twist.angular.y 
-        # odom.twist.twist.angular.z = self.odomm.twist.twist.angular.z 
         odom = copy.deepcopy(self.odomm)
         return odom
     
@@ -414,19 +368,6 @@ class PtdrlRobEnv():
         scan.intensities = self.scann.intensities
 
         return scan
-    
-    def get_viz(self):
-        viz = MarkerArray()
-        for i in range(self.num_tracks):
-            marker = Marker()
-            marker.id = i
-            viz.markers.append(marker)
-
-        for i in range(self.num_tracks):
-            viz.markers[i].pose.position.x = self.vizz.markers[i].pose.position.x
-            viz.markers[i].pose.position.y = self.vizz.markers[i].pose.position.y
-
-        return viz
     
     def get_costmap(self):
         costmap = OccupancyGrid()
@@ -479,44 +420,6 @@ class PtdrlRobEnv():
         self.odom_buffer.append(linear_vel)
         self.odom_buffer_size += 1
 
-    def update_min_scan_buffer_k(self):
-
-        scann = self.get_scan()
-        ranges = np.array(scann.ranges)
-        idx = np.argpartition(ranges, self.k)
-        ranges = ranges[idx[:self.k]]
-        min_max_dist = np.max(ranges)
-
-        self.min_scan_buffer.pop(0)
-        self.min_scan_buffer.append(min_max_dist)
-        self.min_scan_buffer_size += 1
-
-    def get_costmap_buffer(self):
-
-        costmap_buffer = [None]*10
-        for itr in range(10):
-            costmap_buffer[itr] = self.costmap_bufferr[itr]
-        
-        return costmap_buffer
-    
-    def get_min_scan_buffer(self):
-
-        min_scan_buffer = [None]*10
-        for itr in range(10):
-            min_scan_buffer[itr] = self.min_scan_buffer[itr]
-        
-        #print(min_scan_buffer)
-        return min_scan_buffer
-
-    def get_odom_buffer(self):
-
-        odom_buffer = [None]*10
-        for itr in range(10):
-            odom_buffer[itr] = self.odom_buffer[itr]
-        
-        #print(min_scan_buffer)
-        return odom_buffer
-    
     def get_linear_vel(self):
         odomm = self.get_odom()
         linear_x = np.abs(odomm.twist.twist.linear.x)
