@@ -28,7 +28,6 @@ $$
 \lambda_{0}=\frac{2\,\varepsilon_{\max}}{g_{\max}}.
 $$
 
-* $\alpha$: scale normalizer (e.g., 2.5), same spirit as TD3+BC.
 * $\varepsilon_{\max}$: desired trust-region radius (max allowed deviation from the expert).
 * $g_{\max}$: cap on the critic’s action-gradient norm (enforced below).
 
