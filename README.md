@@ -39,7 +39,7 @@ $$
 
 ---
 
-## 2) Critic loss with hinge gradient-penalty (both critics)
+## 2) Critic loss with hinge gradient-penalty
 
 For a minibatch $\{(s_i,a_i,r_i,s'_i)\}_{i=1}^N$, with
 $\tilde a_i=\pi_{\phi'}(s'_i)+\epsilon$ and
