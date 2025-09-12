@@ -1,472 +1,371 @@
 #!/usr/bin/env python3
 
-#######################
-## Environment class ##
-#######################
-
-# Reset environment
-# Compute reward
-# Perform action
-# Get obs
-# Is done
-
-
 import rospy
-import actionlib
-from gazebo_msgs.srv import SetModelState, SetModelStateRequest
-from tf.transformations import euler_from_quaternion, quaternion_from_euler
-from geometry_msgs.msg import Pose, PoseWithCovarianceStamped , PoseStamped, Twist
-from std_srvs.srv import Empty, EmptyResponse, EmptyRequest
-from tf.transformations import euler_from_quaternion, quaternion_from_euler
 import numpy as np
-from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal, MoveBaseFeedback, MoveBaseResult
-from actionlib_msgs.msg import GoalStatusArray
-from sensor_msgs.msg import LaserScan
-from nav_msgs.msg import Odometry
-from actionlib_msgs.msg import GoalID
-import csv
-import os
-from pathlib import Path
-from std_srvs.srv import EmptyRequest,  Empty
-from visualization_msgs.msg import MarkerArray, Marker
-import dynamic_reconfigure.client
-import robot_env
-import lstm_mdn_simple
-import yaml
-from yaml.loader import SafeLoader
-import torch
-import phydnet_predict
-from models.vae import VAE
-from models.mdrnn import MDRNNCell
-from models.reward import REWARD
-from models.sft import SFT
-import time
-
-import matplotlib.cm as cm
-from random import randrange
-import matplotlib.animation as animation
-from PIL import Image
-import time
-from matplotlib.animation import FuncAnimation
 from numpy import inf
+from collections import deque
 
+import robot_env
 
-import matplotlib.pyplot as plt
-
-# open yaml file
-dir_path = os.path.dirname(os.path.realpath(__file__))
-
-# Paths
-dir_path_vae_input_inflation = dir_path + "/networks/vae_input_inflation/best.tar"
-dir_path_mdrnn = dir_path + "/networks/mdrnn/best.tar"
-
-dir_path_yaml = dir_path
-dir_path_yaml = dir_path_yaml.split("/")
-dir_path_yaml = dir_path_yaml[:-2]
-dir_path_yaml += ["params"]
-dir_path_yaml = '/'.join(dir_path_yaml)
-
-file = "task_params"
-yaml_file = "/" + file + ".yaml"
-
-dir_path_yaml += yaml_file
-
-# Constants
-ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE =\
-    3, 32, 256, 64, 64
-
-class PtdrlTaskEnv(robot_env.PtdrlRobEnv):
-
-    """ Superclass for PTDRL Task environment
+class TaskEnv(robot_env.RobEnv):
     """
+    Minimal environment containing only what's required by:
+      • reset()
+      • step_cdrl_short_lidar()
+    and their direct dependencies.
+
+    Assumes robot_env.RobEnv provides:
+      - clear_min_scan_buffer_size(), clear_odom_buffer_size(), clear_costmap()
+      - get_scan(), get_odom(), get_gp(), send_vel(), send_goal(), init_robot()
+      - (optional) other ROS-plumbing already initialized in your app
+    """
+
     def __init__(self):
-        """Initializes a new PTDRL Task environment
-        """
+        # Timing
+        self.rate_task = rospy.Rate(10)
 
-        self.get_params()
+        # State flags / counters
+        self.clear_costmap_counter = 0
+        self.status_move_base = 0
+        self.counter = -1
 
-        # Simulation rate
-        self.rate_task = rospy.Rate(10) # Use 10 rate. 5 now 3
-
-        # Counters
-        self.counter = -1 #1 Counter to change goal and init pose
-        self.clear_costmap_counter = 0  
-        self.stuck = 0 # if more than 500 seconds passed and the robot did not move then the environment crashed      
-        # Position and goals
+        # Goals & poses (fill these from your code before calling reset())
+        self.list_init_pose = []   # e.g., [Pose(), Pose(), ...]
+        self.list_goals = []       # e.g., [Pose(), Pose(), ...]
         self.init_pose = None
         self.goal = None
-        # Robot constants
-        self.max_vel_robot = 1
+        self.wp_goal = None
 
-        # NN's
-        self.img_channels = 3
-        self.cuda = torch.cuda.is_available()
-        self.device = torch.device("cuda" if self.cuda else "cpu")
 
-        # Initialize networks
-        self.vae_input_inflation = VAE(self.img_channels, 32).to(self.device)
-        self.mdrnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(self.device)
 
-        # SFT and Reward
-        self.reward_net = REWARD(290, 4).to(self.device)
-        self.sft = SFT(290, 4).to(self.device)
-        
-        # Load networks
-
-        self.state_input_inflation = torch.load(dir_path_vae_input_inflation)
-        self.vae_input_inflation.load_state_dict(self.state_input_inflation['state_dict'])
-
-        self.state_mdrnn = torch.load(dir_path_mdrnn)
-        self.mdrnn.load_state_dict({k.strip('_l0'): v for k, v in self.state_mdrnn['state_dict'].items()})
-
-        # INitialize netowrk variables
-        self.hidden =[torch.zeros(1, RSIZE).to(self.device) for _ in range(2)]
-
-        robot_env.PtdrlRobEnv.__init__(self, model_name = self.model_name, amcl = self.amcl, min_dist_to_obstacle = self.min_dist_to_obstacle,
-                                    min_dist_to_goal = self.min_dist_to_goal, num_tracks = self.num_tracks, timeout = self.timeout)
-
-    def get_params(self):
-        """
-        Get parameters from yaml file. These parameters include:
-        1) Goals and starting points inside the hospital
-        2) Local planner name
-        3) Whether to use amcl or not
-        4) Robot name
-        5) TImeouts
-        6) Option to use discrete or continous actions (In PTDRL it is discrete)
-        """
-
-        with open(dir_path_yaml, 'r') as f:
-            data = list(yaml.load_all(f, Loader=SafeLoader))
-        
-        # Time
-        self.timeout = data[0]["timeout"]
-
-        # Model
-        self.model_name = data[0]["model_name"]
-
-        # Navigation
-        self.amcl = data[0]["amcl"]
-
-        # Tracking
-        self.num_tracks = data[0]["num_tracks"]
-
-        # Actionsctions
-        self.discrete_actions = data[0]["discrete_actions"]
-        self.list_tune_params = []
-
-        # World
-        self.min_dist_to_obstacle = data[0]["min_dist_to_obstacle"]
-        self.min_dist_to_goal = data[0]["min_dist_to_goal"]
-
-        self.list_init_pose = []
-        self.list_goals = []
-
-        # Local planner
-        self.local_planner = data[0]["local_planner"]
-        if self.local_planner == "dwa":
-            tune_params = "tune_params_dwa"
-        else:
-            tune_params = "tune_params_teb"
-
-        for i in range(len(data[0][tune_params])):
-            one_param = []
-            one_param.append(data[0][tune_params][i]["name"])
-            one_param.append([data[0][tune_params][i]["min"], data[0][tune_params][i]["max"]])
-            self.list_tune_params.append(one_param)
-        #print(f"These are the params {self.list_tune_params}")
-
-        for i in range(len(data[0]["list_init_pose"])):
-            self.list_init_pose.append(Pose())
-            self.list_goals.append(Pose())
-            
-            #print(data[0]["list_init_pose"][0]["x"])
-            self.list_init_pose[i].position.x = data[0]["list_init_pose"][i]["x"]
-            self.list_init_pose[i].position.y = data[0]["list_init_pose"][i]["y"]
-            self.list_init_pose[i].position.z = 0
-            orientation = quaternion_from_euler(0,0,0)
-            
-            self.list_init_pose[i].orientation.x =  orientation[0]
-            self.list_init_pose[i].orientation.y =  orientation[1]
-            self.list_init_pose[i].orientation.z =  orientation[2]
-            self.list_init_pose[i].orientation.w =  orientation[3]
-
-            self.list_goals[i].position.x = data[0]["list_goals"][i]["x"]
-            self.list_goals[i].position.y = data[0]["list_goals"][i]["y"]
-    
-    def _set_init_pose(self):
-        """
-        Initiate robot by locating it in one of the places of the hospital.
-        """
-
-        self.init_robot(self.init_pose)
-        #print(self.init_pose)
-        #print("Robot initialized!!!")
-    
-    def _send_goal(self):
-        """
-        Send robot to goal (Declare move_base goal).
-        """
-
-        #print(self.goal)
-        self.send_goal(self.goal)
-        #print("Goal sent!!!")
-    
+    # =========================
+    # ======  RESET  ==========
+    # =========================
     def reset(self):
         """
-        Init variables, set robot in position, clear costmap and send goal.
+        Minimal reset that:
+          1) Rotates through `list_init_pose`/`list_goals` if provided
+          2) Initializes env variables and robot pose
+          3) Clears costmap & sends a new goal
+          4) Seeds waypoint goal
+          5) Returns zeroed observation compatible with step_cdrl_short_lidar
         """
-
         self.counter += 1
-        iter = self.counter % len(self.list_init_pose)
 
-        self.init_pose = self.list_init_pose[iter]
-        self.goal = self.list_goals[iter]
+        if len(self.list_init_pose) > 0:
+            idx = self.counter % len(self.list_init_pose)
+            self.init_pose = self.list_init_pose[idx]
+            if len(self.list_goals) == len(self.list_init_pose):
+                self.goal = self.list_goals[idx]
 
         self._init_env_variables()
 
-        self._set_init_pose()
+        if self.init_pose is not None:
+            self._set_init_pose()
 
         self.clear_costmap()
 
-        self._send_goal()
+        if self.goal is not None:
+            self._send_goal()
 
-        return np.zeros([290]) # Lidar: 722, VAE: 34, VAE_MDRNN: 290
-    
-    def _init_env_variables(self):
+        self.set_wp_goal()
 
-        self.status_move_base = 0
-    
+        # Return zeros matching (velocity, angle, lidar_stack(k=4), reward, done)
+        k = 4
+        return np.zeros(2), np.zeros(2), np.zeros(720 * k), 0.0, 0
 
-    def step_vae_mdrnn(self, action):
-        """
-        Step for vae and mdrnn
-        Update hidden given action, set action,  wait for rewards, return obs and is_done.
-        Ablation indicates which input to use.
-        """
-        # Ablation: Choose to use lidar, VAE, or VAE + MDN-RNN.
-        ablation = 2 # 0 Just lidar, 1 just VAE
+    # ===============================
+    # ======  STEP  =================   
+    # ===============================
+    def step(self, action):
+        k = 4  # number of historical LiDAR frames to stack
 
-        # Clear buffers: Clear costmap buffers.
+        # Clear buffers / periodic costmap clear
         self.clear_min_scan_buffer_size()
         self.clear_odom_buffer_size()
-        # Clear costmap every 0.5 seconds
         self.clear_costmap_counter += 1
         if self.clear_costmap_counter == 10:
             self.clear_costmap()
             self.clear_costmap_counter = 0
 
-        # Initialization
+        # Init step vars
         is_done = 0
-        action = action
-        if self.discrete_actions == False:
-            action = self.translate_continous_action(action)
-        
-        # Update MDN-RNN Neural Network. self.hidden[0] is h. 
-        obs_costmap = self.get_costmap()
-        latent_mu, logvar_i_o = self.process_obs_3(obs_costmap)
-        mdrnn_action = self.get_action_for_mdrnn(action)
-        with torch.no_grad():
-            _, _, _, _, _, self.hidden = self.mdrnn(mdrnn_action, latent_mu, self.hidden)
+        velocity = np.zeros(2, dtype=np.float32)
+        angle = np.zeros(2, dtype=np.float32)
 
+        # Initial waypoint (for progress computation)
+        _, init_point, wp = self.get_dist_and_wp_v2()
+        if isinstance(wp, bool):
+            return np.zeros(2), np.zeros(2), np.zeros(720 * k), -self.dist_to_goal() * 1.0, 1
 
-        # Take action: Tune move_base parameters.
-        self.tune_parameters(action)
-        self.rate_task.sleep()
+        # Apply action and wait a bit
+        self.send_vel(action)
+        for _ in range(5):
+            self.rate_task.sleep()
 
-        # Get observations: Get lidar, costmap, current velocity (v), and VAE (z). 
-        lidar = self.get_filtered_scan()
-        obs_costmap = self.get_costmap()
-        latent_mu, _ = self.process_obs_3(obs_costmap)
-        vel = self.get_vel()
-        obs = self.extract_3(latent_mu, self.hidden[0], vel)
-        obs_0 = self.extract_lidar(lidar, vel)
-        obs_1 = self.extract_vae(latent_mu, vel)
+        # Progress toward waypoint
+        travelled_dist = self.get_dist_traveled(init_point, wp)
 
-        # Set reward
-        reward = self.reward_func(lidar)
+        # Next observation
+        lidar = self.get_stacked_scan(k)
+        tries, angle_atan, PSI, gp, gp_len, wp = self.try_get_path_v2()  # get new local goal
+        if tries == 10:
+            return np.zeros(2), np.zeros(2), lidar, -self.dist_to_goal() * 1.0, 1
+        if isinstance(wp, bool):
+            return np.zeros(2), np.zeros(2), np.zeros(720 * k), -self.dist_to_goal() * 1.0, 1
 
-        # Episode finished
-        if self.status_move_base == 4: # 4 stands for goal aborted
+        angle[0] = np.sin(angle_atan)
+        angle[1] = np.cos(angle_atan)
+
+        odom = self.get_odom()
+        velocity[0] = odom.twist.twist.linear.x
+        velocity[1] = odom.twist.twist.angular.z
+
+        # Reward & termination
+        reward = self.reward(lidar, travelled_dist)
+        is_done = self.goal_reached_dist()
+
+        if is_done == 1:
+            reward = 10
+        if self.status_move_base == 4:  # aborted
             is_done = 1
-            reward = -10
-        if self.status_move_base == 3: # 3 stands for goal reached
+            reward = -1
+        if self.status_move_base == 3:  # goal reached
             is_done = 1
-            reward = 0
+            reward = 10
 
-        if ablation == 0:
-            return obs_0, reward, is_done
-        elif ablation == 1:
-            return obs_1, reward, is_done
-        else:
-            return obs, reward, is_done
+        if is_done:
+            print(f"Distance to goal: {self.dist_to_goal()}")
 
-    def extract_3(self, z, h, v):
+        return velocity, angle, lidar, reward, is_done
+
+    # ===========================
+    # ===== Reset helpers =======
+    # ===========================
+    def _init_env_variables(self):
+        self.status_move_base = 0
+
+    def _set_init_pose(self):
+        # Provided by robot_env.PtdrlRobEnv
+        self.init_robot(self.init_pose)
+
+    def _send_goal(self):
+        # Provided by robot_env.PtdrlRobEnv
+        self.send_goal(self.goal)
+
+    def set_wp_goal(self):
+        X, Y = self.get_robot_position()
+        self.wp_goal = np.array([X, Y], dtype=np.float32)
+
+    # ============================================
+    # ======  Direct helpers (shared)  ===========
+    # ============================================
+    def get_stacked_scan(self, k: int = 4, max_range: float = 3.5, flatten: bool = True):
         """
-        Concatenate VAE (z), MDN-RNN (h), and velocity (v).
+        Return current laser scan together with the last k history frames.
+        Ordering is oldest → newest along axis 0.
         """
-
-        z_t = z.cpu().data.numpy()[0]
-        h_t = h.cpu().data.numpy()[0]
-        v_t = v
-
-        obs_cat = np.concatenate((z_t, h_t, v_t), axis = 0)
-
-        return (obs_cat)
-    
-    def extract_lidar(self, lidar, v):
-        """
-        Concatenate lidar and velocity.
-        """
-        obs_cat = np.concatenate((lidar, v), axis = 0)
-
-        return (obs_cat)
-
-    def extract_vae(self, z, v):
-        """
-        Concatenate VAE (z) and velocity (v).
-        """
-        z_t = z.cpu().data.numpy()[0]
-        v_t = v
-
-        obs_cat = np.concatenate((z_t, v_t), axis = 0)
-
-        return (obs_cat)
-
-    def costmap_to_np(self, costmap):
-        """
-        Convert occupancy grid to numpy.
-        """
-
-        costmap_np = np.zeros([60,60])
-        if costmap is not None:
-            costmap_np = np.divide(np.array_split(costmap.data, 60),100) # costmap size is 60
-        return costmap_np   
-    
-    def process_obs_3(self, obs):
-        """
-        Encode costmap using VAE Neural Netowrk.
-        """
-
-        image_i = np.zeros([1,3,64,64]) # 3 channels. 64x64 costmap (instead of 60x60)
-
-        for itr in range(self.img_channels):
-            image_i[0,itr,0:60,0:60] = self.costmap_to_np(obs)
-          
-        # Encode input image
-        image_i = torch.tensor(image_i)
-        image_i = image_i.to(self.device, dtype=torch.float)
-        image_i_o, mu_i_o, logvar_i_o = self.vae_input_inflation(image_i)
-
-
-        ####################################################
-        #Show images #######################################
-
-        # fig2, (ax11, ax22) = plt.subplots(1, 2)
-        # fig2.suptitle('Images')
-
-        # im1 = Image.fromarray(np.fliplr(np.squeeze(image_i_o[0,0].cpu().data.numpy()))*256)
-        # imgplot = ax11.imshow(im1)
-        # ax11.set_title("Input")
-
-
-        # im3 = Image.fromarray(np.fliplr(np.squeeze(obs.cpu().data.numpy()))*256)
-        # imgplot = ax22.imshow(im3)
-        # ax22.set_title("Decoded input")
-
-        #####################################################
-        #####################################################
-
-        # plt.show(block=False)
-        # plt.pause(1)
-        # plt.close()
-        # plt.show()
-        
-        return mu_i_o, logvar_i_o
-    
-    def translate_continous_action(self, values, exact):
-        """
-        Translate from numbers to values of parameters for parameter tuning in the case of continous actions.
-        """
-
-        action = {}
-
-        for itr in range(len(self.list_tune_params)):
-            if exact:
-                val = values[itr]
-            else:
-                val = self.get_action(self.list_tune_params[itr][1][0], self.list_tune_params[itr][1][1], values[itr])
-            if self.list_tune_params[itr][0] != 'vel':
-                action[self.list_tune_params[itr][0]] = val
-            else:
-                if self.local_planner == "dwa":
-                    action['max_vel_x'] = val
-                    action['min_vel_x'] = -val
-                    action['max_vel_trans'] = val
-                else:
-                    action['max_vel_x'] = val
-        return action
-
-    
-    def get_action(self, min, max, value):
-        """
-        Average value using fixed min and max (so that parameter is in a range).
-        """
-
-        return min + (max - min)*((value + 1)/2)
-    
-    def get_action_for_mdrnn(self, action):
-        """
-        Concatenate linear velocity, angular velocity, and inflation radius - which is the "action" to send to MDN-RNN Neural Network.
-        """
-
-        inflation = action['inflation_radius']
-        cmd_vel = self.get_cmd_vel()
-        mdrnn_action = np.zeros([1,3])
-        mdrnn_action[0,0] = cmd_vel.linear.x
-        mdrnn_action[0,1] = cmd_vel.angular.z
-        mdrnn_action[0,2] = inflation
-
-        return torch.cuda.FloatTensor(mdrnn_action)
-
-    
-    def get_filtered_scan(self):
-        """
-        Filter scan so that inf values have the maximal value for the lidar scan (3.5).
-        """
-
         scan = self.get_scan()
-        ranges = np.asarray(scan.ranges)
-        for i in range(0, len(ranges)):
-            if ranges[i] == inf:
-                ranges[i] = 3.5
+        ranges = np.asarray(scan.ranges, dtype=np.float32)
+        ranges[ranges == inf] = max_range
 
-        return ranges
-    
-    def get_vel(self):
-        """
-        Get current velocity of robot from odometry input.
-        """
+        if not hasattr(self, "_lidar_buf"):
+            # store k+1 frames total; prime buffer with the first scan
+            self._lidar_buf = deque(maxlen=k + 1)
+            for _ in range(k + 1):
+                self._lidar_buf.append(ranges.copy())
 
+        # Append newest (deque drops oldest automatically)
+        self._lidar_buf.append(ranges)
+
+        stacked = np.stack(self._lidar_buf, axis=0)  # (k+1, 720)
+        return stacked.reshape(-1) if flatten else stacked
+
+    def try_get_path_v2(self, max_tries: int = 20):
+        """Attempt to fetch local-goal angle and related path info."""
+        angle_atan, PSI, gp, gp_len, wp = self.get_local_goal_angle_v2()
+        tries = 0
+        for _ in range(max_tries):
+            tries += 1
+            if isinstance(gp, bool) and gp is False:
+                self.rate_task.sleep()
+                angle_atan, PSI, gp, gp_len, wp = self.get_local_goal_angle_v2()
+            else:
+                break
+            self.rate_task.sleep()
+        return tries, angle_atan, PSI, gp, gp_len, wp
+
+    def get_local_goal_angle_v2(self):
+        """
+        Choose a local goal (waypoint) along the global path based on distance
+        and heading change, then return its bearing (egocentric).
+        """
+        gp, X, Y, PSI = self.get_global_path_and_robot_status()
+        if isinstance(gp, bool) and gp is False:
+            return 0, 0, False, 0, 0
+
+        egocentric = True
+        lg = np.zeros(2, dtype=np.float32)
+        itr = 0
+
+        los = 3.0
+        min_los = 0.5
+        if len(gp) > 0:
+            lg_flag = 0
+            for wp in gp:
+                itr += 1
+                dist = np.sqrt(np.sum((np.asarray(wp) - np.array([0.0, 0.0])) ** 2))
+                angle = 0.0
+                if dist > min_los:
+                    mid = int(itr / 2)
+                    angle = self.calculate_angle(gp[mid], wp - gp[mid])
+                if (dist > los) or (30 < angle < 150):
+                    lg = wp if egocentric else self.transform_lg(wp, X, Y, PSI)
+                    lg_flag = 1
+                    break
+            if lg_flag == 0:
+                lg = gp[-1] if egocentric else self.transform_lg(gp[-1], X, Y, PSI)
+
+        local_goal = np.array([np.arctan2(lg[1], lg[0])], dtype=np.float32)
+        return local_goal, PSI, gp, itr, np.array(lg, dtype=np.float32)
+
+    def calculate_angle(self, v1, v2):
+        v1 = np.asarray(v1, dtype=np.float32)
+        v2 = np.asarray(v2, dtype=np.float32)
+        dot = float(np.dot(v1, v2))
+        mag = float(np.linalg.norm(v1) * np.linalg.norm(v2))
+        if mag == 0.0:
+            return 0.0
+        cos_t = np.clip(dot / mag, -1.0, 1.0)
+        return np.degrees(np.arccos(cos_t))
+
+    def get_global_path_and_robot_status(self):
+        gp = self.get_gp()
+        if (isinstance(gp, bool) and gp is False) or isinstance(gp, int):
+            return False, False, False, False
+
+        X, Y, Z, PSI, qt = self.get_robot_status()
+        gp = self.transform_gp(gp, X, Y, PSI)
+        return gp.T, X, Y, PSI
+
+    def transform_gp(self, gp, X, Y, PSI):
+        R_r2i = np.array([[np.cos(PSI), -np.sin(PSI), X],
+                          [np.sin(PSI),  np.cos(PSI), Y],
+                          [0,            0,           1]])
+        R_i2r = np.linalg.inv(R_r2i)
+        pi = np.concatenate([gp, np.ones_like(gp[:, :1])], axis=-1)
+        pr = R_i2r @ pi.T
+        return np.asarray(pr[:2, :])
+
+    def transform_lg(self, wp, X, Y, PSI):
+        R_r2i = np.array([[np.cos(PSI), -np.sin(PSI), X],
+                          [np.sin(PSI),  np.cos(PSI), Y],
+                          [0,            0,           1]])
+        R_i2r = np.linalg.inv(R_r2i)
+        pi = np.array([[wp[0]], [wp[1]], [1]])
+        pr = R_i2r @ pi
+        return np.array([pr[0, 0], pr[1, 0]], dtype=np.float32)
+
+    def get_robot_status(self):
         odom = self.get_odom()
-        vel = np.zeros([2])
-        vel[0] = odom.twist.twist.linear.x
-        vel[1] = odom.twist.twist.angular.z
-        
-        return vel
-    
-    def reward_func(self, obs):
-        """
-        Reward function for PTDRL. Consists of a combination of robot velocity, and minimal distance to obstacles.
-        """
+        q1 = odom.pose.pose.orientation.x
+        q2 = odom.pose.pose.orientation.y
+        q3 = odom.pose.pose.orientation.z
+        q0 = odom.pose.pose.orientation.w
+        X = odom.pose.pose.position.x
+        Y = odom.pose.pose.position.y
+        Z = odom.pose.pose.position.z
+        PSI = np.arctan2(2 * (q0 * q3 + q1 * q2), (1 - 2 * (q2 ** 2 + q3 ** 2)))
+        qt = (q1, q2, q3, q0)
+        return X, Y, Z, PSI, qt
 
-        # Robot velocity
+    def get_dist_and_wp_v2(self):
+        """Return (wp_error, current_position, chosen_waypoint)."""
+        max_tries = 20
+        los = 3.0
+        min_los = 0.5
+
+        gp = None
+        for _ in range(max_tries):
+            gp = self.get_gp()
+            if (isinstance(gp, bool) and gp is False) or isinstance(gp, int):
+                gp = self.get_gp()
+            else:
+                break
+        if (isinstance(gp, bool) and gp is False) or isinstance(gp, int):
+            return False, False, False
+
+        X, Y = self.get_robot_position()
+        wpp = np.zeros(2, dtype=np.float32)
+        dist = 0.0
+        for itr, wp in enumerate(gp, start=1):
+            wpp = wp
+            dist = self.get_dist(np.array([X, Y], dtype=np.float32), np.asarray(wp, dtype=np.float32))
+            ang = 0.0
+            if dist > min_los:
+                ang = self.calculate_angle(gp[int(itr / 2)] - gp[0], wp - gp[int(itr / 2)])
+            if (dist > los) or (30 < ang < 150):
+                break
+
+        wp_error = (dist / los) + 0.2
+        return wp_error, np.array([X, Y], dtype=np.float32), np.array(wpp, dtype=np.float32)
+
+    def get_dist(self, a, b):
+        d = a - b
+        return float(np.sqrt(np.sum(d * d)))
+
+    def get_dist_traveled(self, init_point, wp):
+        X, Y = self.get_robot_position()
+        final_point = np.array([X, Y], dtype=np.float32)
+        init_dist = self.get_dist(init_point, wp)
+        final_dist = self.get_dist(final_point, wp)
+        return init_dist - final_dist
+
+    def goal_reached_dist(self):
+        """Return 1 if within 1.0 m of goal, otherwise 0."""
+        xy = self._goal_xy()
+        if xy is None:
+            return 0
+        min_dist = 1.0
+        X, Y = self.get_robot_position()
+        current = np.array([X, Y], dtype=np.float32)
+        g = np.array(xy, dtype=np.float32)
+        return 1 if self.get_dist(current, g) < min_dist else 0
+
+    def get_robot_position(self):
         odom = self.get_odom()
-        vel_rob = np.abs(odom.twist.twist.linear.x)
+        return odom.pose.pose.position.x, odom.pose.pose.position.y
 
-        # Minimum distance
-        min_range = np.min(obs)
+    def _goal_xy(self):
+        """Safely extract (x, y) from self.goal for both Pose-like or tuple-like goals."""
+        if self.goal is None:
+            return None
+        try:
+            return float(self.goal.position.x), float(self.goal.position.y)
+        except AttributeError:
+            try:
+                return float(self.goal[0]), float(self.goal[1])
+            except Exception:
+                return None
 
-        reward_func = vel_rob*(-1 if min_range < 0.75 else 1) - self.max_vel_robot # For RL: velocity and obstacles equally
+    def dist_to_goal(self):
+        xy = self._goal_xy()
+        if xy is None:
+            return np.inf
+        odom = self.get_odom()
+        dx = odom.pose.pose.position.x - xy[0]
+        dy = odom.pose.pose.position.y - xy[1]
+        return float(np.sqrt(dx * dx + dy * dy))
 
-        return reward_func
+    def reward(self, lidar, travelled_dist):
+        """
+        Per-step reward:
+            r = −0.1 + travelled_dist + min_range − 1.0
+            extra −2.0 if stuck & very close (<0.15 m)
+        """
+        min_range = float(np.min(lidar))
+        r_collision = min(min_range - 1.0, 0.0)  # ≤ 0 when obstacle < 1.0 m
+        reward = -0.1 + travelled_dist + r_collision
+        if abs(travelled_dist) < 0.01 and min_range < 0.15:
+            reward -= 2.0
+        return reward
