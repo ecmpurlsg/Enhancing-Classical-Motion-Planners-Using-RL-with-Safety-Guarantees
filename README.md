@@ -37,10 +37,7 @@ $$
 
 ## 2) Critic loss with hinge gradient-penalty
 
-For a minibatch $\{(s_i,a_i,r_i,s'_i)\}_{i=1}^N$, with
-$\tilde a_i=\pi_{\phi'}(s'_i)+\epsilon$ and
-$y_i=r_i+\gamma\min_{j=1,2}Q_{\theta_j'}(s'_i,\tilde a_i)$,
-the critic objective is
+For a minibatch the critic objective is
 
 $$
 \begin{aligned}
