@@ -4,9 +4,6 @@
 
 Modification of TD3+BC: https://github.com/sfujim/TD3_BC , to include Online Expert (instead of behavioral cloning) and explicit trust region.
 
-Here’s a **GitHub-ready README.md** block (KaTeX math). Copy–paste as is:
-
----
 
 ## 1) Actor loss (TD3+OE)
 
