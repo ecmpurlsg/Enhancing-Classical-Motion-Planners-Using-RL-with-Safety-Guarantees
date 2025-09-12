@@ -12,8 +12,8 @@ We replace TD3+BC’s BC term with an **online-expert** penalty and cap the adap
 $$
 \tilde{\lambda}=\min\{\lambda,\lambda_0\},\qquad
 L_{\text{actor}}
-=\mathbb{E}_{s\sim\mathcal{D}}\!\left[
-\tilde{\lambda}\,Q_{\theta}\!\big(s,\pi_{\phi}(s)\big)
+=\mathbb{E}_{s\sim\mathcal{D}}\left[
+\tilde{\lambda}\,Q_{\theta}\big(s,\pi_{\phi}(s)\big)
 -\tfrac{1}{2}\,\big\|\pi_{\phi}(s)-\pi_{\text{expert}}(s)\big\|_2^{2}
 \right].
 $$
