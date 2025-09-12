@@ -55,7 +55,7 @@ where $[x]_+=\max(0,x)$ and the action-gradients are evaluated at $a=a_i$.
 
 * This **averaged hinge penalty** keeps both critics’ $\|\nabla_a Q\|\le g_{\max}$ (a Lipschitz cap), which makes the actor’s trust-region bound meaningful and stabilizes targets computed with $\min(Q_1',Q_2')$.
 
-
+---
 
 ## Theorem (trust-region / deviation guarantee)
 
