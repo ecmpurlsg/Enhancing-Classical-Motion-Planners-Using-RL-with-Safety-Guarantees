@@ -2,7 +2,7 @@
 
 ## Main Algorithm (TD3+OE)
 
-Modification of TD3+BC: https://github.com/sfujim/TD3_BC , to include online expert and explicit trust region.
+Modification of TD3+BC: https://github.com/sfujim/TD3_BC , to include Online Expert (instead of behavioral cloning) and explicit trust region.
 
 1) ...
 2) ...
