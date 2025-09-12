@@ -1,4 +1,22 @@
+# Enhancing Classical Motion Planners with RL (Safety-Guaranteed)
+
+A practical framework that augments ROS1 navigation with **TD3+OE** (TD3 with Online Expert and an explicit trust region) for safer, more efficient motion planning.
+
+## What’s inside
+- 🧭 **ROS1 navigation** launch/config files.
+- 🤖 **Training pipeline** for TD3+OE on top of the ROS1 stack.
+- 🛡️ **Safety mechanisms**: online-expert regularization, trust-region cap, and critic hinge penalty.
+
+## Main Algorithm — TD3+OE
+TD3 enhanced with an online expert term (instead of offline BC) and a capped actor weight to enforce a trust region; critics are regularized with a hinge gradient penalty for stability.
+```
+
+
+
+
 # Enhancing-Classical-Motion-Planners-Using-RL-with-Safety-Guarantees
+
+## We include the files to run ROS1 navigation and train TD3+OE on it.
 
 ## Main Algorithm (TD3+OE)
 
