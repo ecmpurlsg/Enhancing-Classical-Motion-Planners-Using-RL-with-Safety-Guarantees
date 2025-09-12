@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.cdrl_o3_v1 import ConvGRUActor, ConvGRUCritic
+from models.conv_gru import ConvGRUActor, ConvGRUCritic
 
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -83,10 +83,10 @@ class TD3(object):
 		self.noise_clip = noise_clip
 		self.policy_freq = policy_freq
 
-		self.g_max  = 10.0    # 5 # Lipschitz cap  ‖∇a Q‖ ≤ gmax
+		self.g_max  = 10.0    # Lipschitz cap  ‖∇a Q‖ ≤ gmax
 		self.beta_gp = 1e-2
-		self.alpha = 2.5 # 5.0
-		self.epsilon_max = 0.5 # 2 
+		self.alpha = 2.5 
+		self.epsilon_max = 0.5 
 		self.lambda_0 = 2 * self.epsilon_max / self.g_max
 
 		self.total_it = 0
@@ -219,33 +219,4 @@ class TD3(object):
 		self.actor_optimizer.load_state_dict(torch.load(filename + "_actor_optimizer_" + current_best))
 		self.actor_target = copy.deepcopy(self.actor)
 
-	def load_dpo(self, filename, filename_actor):
-		self.critic.load_state_dict(torch.load(filename + "_critic_current"))
-		self.critic_optimizer.load_state_dict(torch.load(filename + "_critic_optimizer_current"))
-		self.critic_target = copy.deepcopy(self.critic)
-
-		self.actor.load_state_dict(torch.load(filename_actor))
-		self.setup_model_for_inference(self.actor)
-		self.actor_optimizer.load_state_dict(torch.load(filename + "_actor_optimizer_current"))
-		self.actor_target = copy.deepcopy(self.actor)
-
-	def setup_model_for_inference(self, model):
-		# Put the model in evaluation mode
-		model.eval()
-
-		# Disable dropout layers
-		def disable_dropout(m):
-			if type(m) == torch.nn.Dropout:
-				m.train(False)
-		model.apply(disable_dropout)
-
-		# Set batch normalization layers to evaluation mode
-		def set_bn_eval_mode(m):
-			if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-				m.eval()
-		model.apply(set_bn_eval_mode)
-
-		# Freeze gradients for all parameters
-		for param in model.parameters():
-			param.requires_grad = False
 		
