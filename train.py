@@ -5,8 +5,8 @@ import torch
 import argparse
 import os
 
-import replay_buffer
-import TD3_OE
+from utils import replay_buffer
+from utils import TD3_OE
 import rospy
 import task_env
 import os
