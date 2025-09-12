@@ -64,9 +64,9 @@ Let $\pi_\phi^\star$ be any stationary point of $L_{\text{actor}}$ with $\tilde{
 
 $$
 \big\|\pi_\phi^\star(s)-\pi_{\text{expert}}(s)\big\|
-\;\le\;\frac{\tilde{\lambda}L}{2}
-\;\le\;\frac{\lambda_0L}{2}
-\;=\;\varepsilon_{\max}.
+\le\frac{\tilde{\lambda}L}{2}
+\le\frac{\lambda_0L}{2}
+=\varepsilon_{\max}.
 $$
 
 ---
