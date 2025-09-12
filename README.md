@@ -25,7 +25,7 @@ $$
 \frac{1}{N}\displaystyle\sum_{(s_i,a_i)\in\mathcal{B}}
 \big|Q_{\theta}(s_i,a_i)\big|},
 \qquad
-\lambda_{0}=\frac{2\,\varepsilon_{\max}}{g_{\max}}.
+\lambda_{0}=\frac{2\varepsilon_{\max}}{g_{\max}}.
 $$
 
 * $\varepsilon_{\max}$: desired trust-region radius (max allowed deviation from the expert).
