@@ -8,7 +8,7 @@ A practical framework that augments ROS1 navigation with **TD3+OE** (TD3 with On
 
 ## Main Algorithm — TD3+OE
 TD3 enhanced with an online expert term (instead of offline BC) and a capped actor weight to enforce a trust region; critics are regularized with a hinge gradient penalty for stability.
-```
+
 
 Modification of TD3+BC: https://github.com/sfujim/TD3_BC , to include Online Expert (instead of behavioral cloning) and explicit trust region.
 
