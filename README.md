@@ -82,14 +82,16 @@ $$
 
 <img width="300" height="600" alt="algorithm_td3_oe" src="https://github.com/user-attachments/assets/427271dd-d29f-43f9-82f1-38a7ece8f50c" />
 
-## Simulation Top view
+## Simulation (Gazebo) top view
 
 
 https://github.com/user-attachments/assets/8c88e1cc-3d3a-4da2-8dc1-d89406a8aeb6
 
-
+## Pedestrian simulator
 
 https://github.com/user-attachments/assets/ca5f575c-8a54-4fdd-9f51-f8892647cf08
+
+## Rviz
 
 
 
