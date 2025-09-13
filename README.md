@@ -82,17 +82,21 @@ $$
 
 <img width="300" height="600" alt="algorithm_td3_oe" src="https://github.com/user-attachments/assets/427271dd-d29f-43f9-82f1-38a7ece8f50c" />
 
-## Simulation (Gazebo) top view
+# ROS Simulation
 
+## Gazebo top view
+
+Hospital world from: https://github.com/aws-robotics/aws-robomaker-hospital-world
 
 https://github.com/user-attachments/assets/8c88e1cc-3d3a-4da2-8dc1-d89406a8aeb6
 
 ## Pedestrian simulator
 
+Pedestrian simulator from: https://github.com/srl-freiburg/pedsim_ros
+
 https://github.com/user-attachments/assets/ca5f575c-8a54-4fdd-9f51-f8892647cf08
 
 ## Rviz
-
 
 
 https://github.com/user-attachments/assets/98baa66a-14cd-4553-b380-a2cf30d40783
